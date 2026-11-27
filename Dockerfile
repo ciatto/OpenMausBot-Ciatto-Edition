@@ -62,7 +62,16 @@ COPY cloudflare/control-plane/package.json ./cloudflare/control-plane/package.js
 # it, and .dockerignore keeps .git out — so copy it in before install or the
 # whole build dies on MODULE_NOT_FOUND.
 COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
-RUN pnpm install --frozen-lockfile
+# Bound dependency installation on small CI runners. Native builds need only
+# their own optional CPU packages; cross-builds retain both CPU packages so
+# that the host compiler and target DuckDB binding remain available.
+ARG BUILDARCH
+ARG TARGETARCH
+RUN if [ "$BUILDARCH" = "$TARGETARCH" ]; then \
+      case "$TARGETARCH" in amd64) other=arm64 ;; arm64) other=x64 ;; *) other= ;; esac; \
+      if [ -n "$other" ]; then sed -i "/^    - $other$/d" pnpm-workspace.yaml; fi; \
+    fi \
+ && NODE_OPTIONS=--max-old-space-size=1280 pnpm install --frozen-lockfile --network-concurrency=4 --config.child-concurrency=1
 COPY . .
 # The Cloud home runs these as root, so nobody else may write them. The web app's
 # build needs more heap than Node gives itself on a 4 GB server, where it ran out
@@ -70,9 +79,8 @@ COPY . .
 RUN pnpm build:server && NODE_OPTIONS=--max-old-space-size=6144 pnpm exec vite build && chmod -R go-w dist dist-server skills
 # The Data engine's native modules (server/data/engine.ts), staged like the
 # desktop app's extraResources for the image's CPU (amd64 -> x64, arm64), into
-# one tree the runtime stages copy. pnpm installed both CPUs' packages
-# (pnpm-workspace.yaml supportedArchitectures).
-ARG TARGETARCH
+# one tree the runtime stages copy. Cross-builds install both CPU packages;
+# native builds install their own CPU package (see the install step above).
 RUN arch=x64 && if [ "$TARGETARCH" = arm64 ]; then arch=arm64; fi \
   && OMB_DUCKDB_ARCH=$arch node scripts/prepare-duckdb.mjs \
   && mv "dist-native/duckdb/linux-$arch" dist-native/duckdb/target && chmod -R go-w dist-native/duckdb
