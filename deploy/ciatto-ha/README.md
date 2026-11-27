@@ -7,3 +7,7 @@ The schema has no PUBLIC grants. Integrate via a dedicated service role with onl
 Run in isolated PostgreSQL: `psql -v ON_ERROR_STOP=1 -f 001_fencing.sql -f test_fencing.sql`. The test is synthetic and should never run against production.
 
 Further gates: runtime storage adapter (all message, runtime, routine, file and attachment semantics), DB migration/reconciliation, authenticated UI, OAuth registrations/refresh per destination, idempotent dispatch and independent reconciliation, actual multi-node failover, metrics/backup/restore, reviewed Kubernetes manifests, no duplicate schedulers.
+
+## Reproducible concurrency qualification
+
+Run `./qualify-local.sh postgres:17-alpine` (or `postgres:18.7-alpine`) with an already installed local image. The disposable database is network-isolated; readiness uses an actual TCP query, not the temporary initialization socket. Both concurrent lease acquisition and duplicate operation claims must have exactly one winner.
