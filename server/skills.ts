@@ -478,9 +478,19 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
 function skillListing(botId: string, name: string, entry: SkillManifestEntry): SkillListing {
   const { appliedStageId, storageRevision: _storageRevision, package: _package, allBots: mark, ...visible } = entry;
   const intact = skillContentMatches(botId, name, entry);
+  // Older imports stored YAML block indicators as the whole description.
+  // Recover metadata only from integrity-verified original bytes; never
+  // modify the reviewed content, digests, enablement or protected manifest.
+  let description = visible.description;
+  if (intact && /^(?:[>|])(?:[+-]?[1-9]?|[1-9][+-]?)$/.test(description.trim())) {
+    const raw = readSkillFile(botId, name);
+    const parsed = raw === null ? null : parseSkillMd(raw);
+    if (parsed && !("error" in parsed) && parsed.name === name) description = parsed.description;
+  }
   return {
     name,
     ...visible,
+    description,
     ...(mark && sharedSkills?.current(botId, mark) ? { allBots: true as const } : {}),
     enabled: entry.enabled && intact,
     editable: entry.source.startsWith(LEARN_SOURCE_PREFIX) && Boolean(appliedStageId),
@@ -1254,7 +1264,11 @@ export function undoSkillWrite(
 
 export function skillsSystemPrompt(botId: string, assignedLibrary?: readonly string[], startedAt?: number): string {
   syncSkillLinks(botId);
-  const enabled = resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled);
+  const mandatory = (skill: SkillListing) =>
+    (skill.source === "ciatto:maintenance-personal-v1" && skill.name === "ciatto-cleanup-lifecycle") ||
+    (skill.source === "ciatto:enterprise-gap-standard-v1" && skill.name === "ciatto-competency-router") ? 0 : 1;
+  const enabled = resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled)
+    .sort((a, b) => mandatory(a) - mandatory(b));
   if (!enabled.length) {
     loggedIndexOmissions.delete(botId);
     return "";

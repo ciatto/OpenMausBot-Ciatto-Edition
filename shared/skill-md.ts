@@ -82,9 +82,8 @@ export function yamlFrontmatterValue(value: string): string {
 }
 
 /** Minimal frontmatter reader for the two required keys plus the two we
- * display. Deliberately not a YAML engine: values are single-line strings in
- * every skill the spec's own examples show, and a parser that cannot
- * evaluate anchors or tags cannot be surprised by them. */
+ * display. Deliberately not a YAML engine: supports plain/quoted strings and indented block scalars for descriptive metadata,
+ * but never evaluates anchors, aliases, tags or other YAML structures. */
 export function parseSkillMd(raw: string): ParsedSkill | { error: string } {
   const frontmatter = readSkillFrontmatter(raw);
   if (!frontmatter) return { error: "SKILL.md has no YAML frontmatter (--- block) at the top" };
@@ -114,10 +113,24 @@ export function readSkillFrontmatter(raw: string): { fields: Record<string, stri
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) return null;
   const fields: Record<string, string> = {};
-  for (const line of match[1]!.split(/\r?\n/)) {
-    const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
+  const lines = match[1]!.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const kv = lines[i]!.match(/^([A-Za-z][\w-]*):[ \t]*(.*)$/);
     if (!kv) continue;
-    fields[kv[1]!.toLowerCase()] = unquoteScalar(kv[2]!);
+    const key = kv[1]!.toLowerCase();
+    const value = kv[2]!.trim();
+    // These are display/search strings, not executable YAML. Consume only
+    // indented continuation lines, never the next top-level field.
+    const block = /^(?:[>|])(?:[+-]?[1-9]?|[1-9][+-]?)$/.test(value);
+    if (block && (key === "description" || key === "compatibility")) {
+      const body: string[] = [];
+      while (i + 1 < lines.length && (/^[ \t]+\S/.test(lines[i + 1]!) || !lines[i + 1]!.trim())) {
+        body.push(lines[++i]!.trim());
+      }
+      fields[key] = value.startsWith("|") ? body.join("\n").trim() : body.join(" ").replace(/\s+/g, " ").trim();
+    } else {
+      fields[key] = unquoteScalar(value);
+    }
   }
   return { fields, body: match[2] ?? "" };
 }

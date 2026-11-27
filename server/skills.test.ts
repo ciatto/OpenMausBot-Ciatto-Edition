@@ -87,6 +87,21 @@ describe("skills prompt index budget", () => {
     writeFileSync(join(stateDir, "skills.json"), JSON.stringify(entries));
   }
 
+  it("keeps CIATTO maintenance and discovery policies in the bounded prompt", () => {
+    manifestSkills(Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`aa-${i}`, "long description ".repeat(50)])));
+    for (const [name, source] of [
+      ["ciatto-cleanup-lifecycle", "ciatto:maintenance-personal-v1"],
+      ["ciatto-competency-router", "ciatto:enterprise-gap-standard-v1"],
+    ]) {
+      expect(installSkill(bot, source, [{ path: "SKILL.md", content: SKILL(name, "Policy for the team.") }])).toMatchObject({ name });
+      expect(setSkillEnabled(bot, name, true)).toMatchObject({ enabled: true });
+    }
+    const prompt = skillsSystemPrompt(bot);
+    expect(prompt).toContain("- ciatto-cleanup-lifecycle:");
+    expect(prompt).toContain("- ciatto-competency-router:");
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+  });
+
   it("keeps an under-budget entry and its exact path without warning", () => {
     const revision = "a".repeat(64);
     manifestSkills({ alpha: "Résumé 🐈" }, [], { alpha: revision });
@@ -194,6 +209,32 @@ describe("parseSkillMd", () => {
   it("rejects a missing description and an oversized one", () => {
     expect("error" in parseSkillMd("---\nname: ok\n---\nbody")).toBe(true);
     expect("error" in parseSkillMd(SKILL("ok", "x".repeat(1025)))).toBe(true);
+  });
+
+  it("reads folded and literal descriptions without consuming the next field", () => {
+    const folded = "---\nname: folded\ndescription: >-\n  Cash forecasting and liquidity.\n  Use for treasury.\nlicense: MIT\nmetadata:\n  description: nested\n---\nbody";
+    expect(parseSkillMd(folded)).toMatchObject({ name: "folded", description: "Cash forecasting and liquidity. Use for treasury.", license: "MIT", body: "body" });
+    expect(parseSkillMd("---\nname: literal\ndescription: |-\n  First line\n  Second line\n---\nbody")).toMatchObject({ description: "First line\nSecond line" });
+    expect("error" in parseSkillMd("---\nname: empty\ndescription: >-\nlicense: MIT\n---\nbody")).toBe(true);
+    expect("error" in parseSkillMd("---\nname: huge\ndescription: >-\n  " + "x".repeat(1025) + "\n---\nbody")).toBe(true);
+  });
+
+  it("recovers legacy folded metadata without rewriting the verified manifest or bytes", () => {
+    const raw = "---\nname: old-folded\ndescription: >-\n  Treasury liquidity forecast.\n---\nbody";
+    const directory = join(workspaceDir(bot), "skills", "old-folded");
+    mkdirSync(directory, { recursive: true });
+    const file = join(directory, "SKILL.md");
+    writeFileSync(file, raw);
+    const state = join(DATA_DIR, "skill-state", bot);
+    mkdirSync(state, { recursive: true });
+    const manifestFile = join(state, "skills.json");
+    const manifest = JSON.stringify({ "old-folded": { ...legacyManifestEntry(raw), description: ">-" } });
+    writeFileSync(manifestFile, manifest);
+    expect(listSkills(bot)[0]).toMatchObject({ description: "Treasury liquidity forecast.", enabled: true });
+    expect(readFileSync(manifestFile, "utf8")).toBe(manifest);
+    expect(readFileSync(file, "utf8")).toBe(raw);
+    writeFileSync(file, raw + "changed");
+    expect(listSkills(bot)[0]).toMatchObject({ description: ">-", enabled: false });
   });
 
   it("reads a SKILL.md saved with a byte order mark", () => {
