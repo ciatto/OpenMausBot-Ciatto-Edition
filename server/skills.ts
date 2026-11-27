@@ -26,6 +26,7 @@ import { redactSecretsInText } from "./redact.ts";
 import {
   githubSkillOriginSchema, prepareSkillFolder, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder, type GitHubSkillOrigin, type SkillFolderFile,
 } from "./skill-folder.ts";
+import { contentMatches, policyPriority } from "./skill-integrity.ts";
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
 import { libraryDescriptionsAt, librarySkillFilePath, librarySkillsForBot, librarySkillsToOffer, type LibrarySkillListing } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
@@ -460,19 +461,7 @@ export interface SkillListing {
 }
 
 function skillContentMatches(botId: string, name: string, entry: SkillManifestEntry): boolean {
-  try {
-    const directory = skillDirectory(botId, name, entry);
-    if (!directory) return false;
-    const file = join(directory, "SKILL.md");
-    if (!lstatSync(file).isFile()) return false;
-    if (createHash("sha256").update(readFileSync(file)).digest("hex") !== entry.sha256) return false;
-    if (entry.filesSha256 && skillFolderDigest(directory, entry.files ?? []) !== entry.filesSha256) return false;
-    if (!entry.referencesSha256) return true;
-    const references = readReferenceFiles(directory);
-    return references !== null && skillReferencesSha256(references) === entry.referencesSha256;
-  } catch {
-    return false;
-  }
+  return contentMatches(() => skillDirectory(botId, name, entry), entry);
 }
 
 function skillListing(botId: string, name: string, entry: SkillManifestEntry): SkillListing {
@@ -1264,11 +1253,7 @@ export function undoSkillWrite(
 
 export function skillsSystemPrompt(botId: string, assignedLibrary?: readonly string[], startedAt?: number): string {
   syncSkillLinks(botId);
-  const mandatory = (skill: SkillListing) =>
-    (skill.source === "ciatto:maintenance-personal-v1" && skill.name === "ciatto-cleanup-lifecycle") ||
-    (skill.source === "ciatto:enterprise-gap-standard-v1" && skill.name === "ciatto-competency-router") ? 0 : 1;
-  const enabled = resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled)
-    .sort((a, b) => mandatory(a) - mandatory(b));
+  const enabled = resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).sort((a, b) => policyPriority(a) - policyPriority(b));
   if (!enabled.length) {
     loggedIndexOmissions.delete(botId);
     return "";
