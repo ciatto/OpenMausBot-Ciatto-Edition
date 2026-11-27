@@ -71,7 +71,8 @@ RUN if [ "$BUILDARCH" = "$TARGETARCH" ]; then \
       case "$TARGETARCH" in amd64) other=arm64 ;; arm64) other=x64 ;; *) other= ;; esac; \
       if [ -n "$other" ]; then sed -i "/^    - $other$/d" pnpm-workspace.yaml; fi; \
     fi \
- && NODE_OPTIONS=--max-old-space-size=1280 pnpm install --frozen-lockfile --network-concurrency=4 --config.child-concurrency=1
+ && printf '\nchildConcurrency: 1\n' >> pnpm-workspace.yaml \
+ && NODE_OPTIONS=--max-old-space-size=1280 pnpm install --frozen-lockfile --network-concurrency=4
 COPY . .
 # The Cloud home runs these as root, so nobody else may write them. The web app's
 # build needs more heap than Node gives itself on a 4 GB server, where it ran out
