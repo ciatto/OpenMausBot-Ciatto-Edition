@@ -22,16 +22,16 @@ trap 'rm -rf "$tmp"' EXIT
 report_dir="$(git rev-parse --absolute-git-dir)/trivy-audit"
 mkdir -p "$report_dir"
 report="$(mktemp "$report_dir/report.XXXXXXXX")"
-cat >"$tmp/template" <<'TPL'
+cat >"$tmp/template.tpl" <<'TPL'
 {{- range . }}{{ $target := .Target }}
 {{- range .Vulnerabilities }}
-{{ .Severity }} {{ .VulnerabilityID }} {{ .PkgName }} {{ .InstalledVersion }} {{ .FixedVersion }}
+{{ .Severity }} {{ .VulnerabilityID }} {{ .PkgName }} {{ .InstalledVersion }} {{ .FixedVersion }} target={{ $target }}
 {{- end }}
 {{- range .Misconfigurations }}
-{{ .Severity }} {{ .ID }}
+{{ .Severity }} {{ .ID }} target={{ $target }}
 {{- end }}
 {{- range .Secrets }}
-{{ .Severity }} secret {{ .RuleID }} line={{ .StartLine }}
+{{ .Severity }} secret {{ .RuleID }} line={{ .StartLine }} target={{ $target }}
 {{- end }}
 {{- end }}
 TPL
@@ -63,12 +63,13 @@ set +e
   cd "$tmp"
   "$bin" --config "$tmp/config.yaml" "$mode" --quiet --disable-telemetry --skip-version-check \
     --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --exit-code 1 \
-    --ignorefile "$tmp/empty.ignore" --format template --template "@$tmp/template" \
+    --db-repository ghcr.io/aquasecurity/trivy-db:2 --db-repository mirror.gcr.io/aquasec/trivy-db:2 \
+    --ignorefile "$tmp/empty.ignore" --format template --template "@$tmp/template.tpl" \
     --output "$tmp/findings" "$target" >"$tmp/scanner.log" 2>&1
 )
 rc=$?
 set -e
-if [ -f "$tmp/findings" ]; then cat "$tmp/findings" >>"$report"; fi
+if [ -f "$tmp/findings" ]; then cat "$tmp/findings" >>"$report"; else printf "status=scanner-error-no-report\n" >>"$report"; fi
 printf '\nexit=%s\n' "$rc" >>"$report"
 printf '[trivy] %s: exit=%s report=%s\n' "$mode" "$rc" "$report" >&2
 [ "$rc" -eq 0 ] || exit 1
