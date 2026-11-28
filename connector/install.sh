@@ -321,8 +321,7 @@ start_connector() {
     [ -f "$ETC_DIR/policy.json" ] && [ ! -L "$ETC_DIR/policy.json" ] || fail "Unsafe connector policy file."
   fi
   docker volume create "$STATE_VOLUME" >/dev/null
-  # Stop only after the access preflight succeeds; preserve all state bytes.
-  docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
+  # Preserve the currently running connector until all ownership checks complete.
   install -d -m 0755 "$ETC_DIR"
   if [ -f "$ETC_DIR/policy.json" ]; then
     chgrp mausbot-connector "$ETC_DIR/policy.json"
@@ -338,7 +337,7 @@ start_connector() {
     chmod 0700 "$UPDATE_DIR"
   fi
   # One-shot, networkless ownership repair. The long-running connector is never root.
-  docker run --rm --network none --user 0:0 --cap-drop ALL --cap-add CHOWN \
+  docker run --rm --network none --user 0:0 --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE \
     --security-opt no-new-privileges=true --entrypoint chown \
     -v "$STATE_VOLUME:/state" "$CONNECTOR_IMAGE" -R 19001:19001 /state \
     || fail "Connector state ownership could not be prepared; state was preserved."
@@ -352,6 +351,8 @@ start_connector() {
   if [ "$MODE" = customer-run ]; then
     set -- "$@" -e MAUSBOT_MODE=customer-run -v "$UPDATE_DIR:/var/lib/mausbot/update"
   fi
+  # Every preflight has passed; only now replace the existing connector.
+  docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
   docker run -d --name "$CONNECTOR" --restart unless-stopped --network host \
     --user 19001:19001 --group-add "$socket_gid" --group-add "$policy_gid" \
     --security-opt no-new-privileges=true --cap-drop ALL --read-only --tmpfs /tmp \
