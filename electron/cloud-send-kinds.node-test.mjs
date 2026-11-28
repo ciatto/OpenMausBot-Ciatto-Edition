@@ -123,6 +123,41 @@ test("a file the move put there that conflicts only when it lands goes beside, a
   assert.ok(sides.stored.has("workspaces/b1/report (Mac).md"));
 });
 
+test("a large move uploads independent files with a bounded pool, journals every completion, and does not resend on retry", async () => {
+  const here = Array.from({ length: 24 }, (_, i) => {
+    const text = `file-content-${i}`;
+    return { ...file(`workspaces/b1/entry-${i}.txt`, text), text };
+  });
+  const sides = filesSides({ here });
+  const originalUpload = sides.ctx.session.upload;
+  let active = 0, maxActive = 0;
+  sides.ctx.session.upload = async (...args) => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      return await originalUpload(...args);
+    } finally { active--; }
+  };
+  await sides.kinds.moveFiles(sides.ctx, [{ id: "b1" }], "Mac");
+  assert.equal(maxActive, 6, "independent paths upload in parallel, with a strict upper bound");
+  assert.equal(sides.uploads.length, here.length);
+  assert.equal(Object.keys(sides.state.files).length, here.length);
+  assert.deepEqual(sides.failed, []);
+  await sides.kinds.moveFiles(sides.ctx, [{ id: "b1" }], "Mac");
+  assert.equal(sides.uploads.length, here.length, "a resumed pass only verifies arrivals and does not resend files");
+});
+
+test("a large destination file index preserves conflict handling without scanning every path", () => {
+  const theirs = Array.from({ length: 4000 }, (_, i) => file(`workspaces/b1/there-${i}.txt`, `hash-${i}`));
+  const here = Array.from({ length: 4000 }, (_, i) => file(`workspaces/b1/here-${i}.txt`, `different-${i}`));
+  const existing = file("workspaces/b1/notes.md", "my notes");
+  const conflicted = file("workspaces/b1/notes.md", "theirs");
+  const preserved = file("workspaces/b1/notes (Mac).md", "my notes");
+  const plan = planFiles([...here, existing], new Map([...theirs, conflicted, preserved].map((x) => [x.path, x])), {}, "Mac");
+  assert.equal(plan.length, here.length, "identical bytes under the conflict-suffixed name are not uploaded twice");
+});
+
 test("files My Cloud has no room for are said plainly and none of them goes; a volume that can grow grows first", async () => {
   const big = { ...file("workspaces/b1/big.bin", "b"), size: 40 * GB, text: "b" };
   const full = filesSides({ here: [big], free: GB, volume: 10 * GB, disk: { maxBytes: 20 * GB }, grow: async () => ({ supported: true }) });

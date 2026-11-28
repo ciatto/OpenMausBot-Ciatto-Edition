@@ -12,6 +12,8 @@ const SHA = /^[a-f0-9]{64}$/u;
 const FILE_PATH = /^(?:workspaces\/[\w-]{1,128}|task-workspaces\/[\w-]{1,128}\/[\w-]{1,200})\/[^\0]{1,3800}$/u;
 /** A part of a file, as My Cloud takes one (server/cloud-send-files.ts). */
 const FILE_PART_BYTES = 8 * 1024 * 1024;
+/** Independent paths may upload together, but one file's chunks always remain ordered. */
+const FILE_WORKERS = 6;
 const SETTINGS_BATCH = 500;
 /** How long My Cloud may take to list a bot's files: longer the more bytes it may have to hash. */
 const LISTING_MS = 2 * 60_000;
@@ -47,12 +49,12 @@ export function keptBoth(path, label) {
 
 /** Whether My Cloud holds this file of this computer's: at its path, or kept beside a different one under a name that
  * starts with its own and the same bytes. */
-export function fileArrived(file, there) {
+export function fileArrived(file, there, byHash = null) {
   if (there.get(file.path)?.sha256 === file.sha256) return true;
   const at = file.path.lastIndexOf("/");
   const name = file.path.slice(at + 1), dot = name.lastIndexOf(".");
   const prefix = `${file.path.slice(0, at + 1)}${dot > 0 ? name.slice(0, dot) : name} (`;
-  for (const [path, held] of there) if (held.sha256 === file.sha256 && path.startsWith(prefix)) return true;
+  for (const [path, held] of (byHash ? byHash.get(file.sha256) ?? [] : there)) if (held.sha256 === file.sha256 && path.startsWith(prefix)) return true;
   return false;
 }
 
@@ -60,8 +62,16 @@ export function fileArrived(file, there) {
  * beside My Cloud's own different file (`kept`). */
 export function planFiles(here, there, sent, label) {
   const plan = [];
+  // Index once, rather than rescanning every destination path for each missing file.
+  // Large agent workspaces can contain hundreds of thousands of small files.
+  const byHash = new Map();
+  for (const [path, held] of there) {
+    const bucket = byHash.get(held.sha256) ?? [];
+    bucket.push([path, held]);
+    byHash.set(held.sha256, bucket);
+  }
   for (const file of here) {
-    if (fileArrived(file, there)) continue;
+    if (fileArrived(file, there, byHash)) continue;
     const held = there.get(file.path);
     if (!held) plan.push({ ...file, to: file.path, mode: "new" });
     else if (sent[file.path] === held.sha256) plan.push({ ...file, to: file.path, mode: "replace", expect: held.sha256 });
@@ -250,17 +260,24 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
       if (short) return void failed(ctx, "files", "files", "Files", short);
     }
     progress(plan.length ? { done: 0, total: plan.length } : null);
-    let done = 0;
-    for (const file of plan) {
-      try {
-        const stored = await sendFile(ctx, file, label);
-        kept.files[stored.to] = file.sha256;
-        ctx.result.files.sent++;
-        if (stored.kept) ctx.result.files.kept++;
-        persist();
-      } catch (error) { failed(ctx, `file:${file.path}`, "files", file.path.split("/").pop(), error?.message); }
-      progress({ done: ++done, total: plan.length });
-    }
+    let done = 0, cursor = 0;
+    // Paths are independent; offsets inside a single file are still serial in
+    // sendFile. Bounded workers avoid overwhelming the destination and keep
+    // the journal durable after every completed file for restart-safe resumes.
+    const worker = async () => {
+      while (cursor < plan.length) {
+        const file = plan[cursor++];
+        try {
+          const stored = await sendFile(ctx, file, label);
+          kept.files[stored.to] = file.sha256;
+          ctx.result.files.sent++;
+          if (stored.kept) ctx.result.files.kept++;
+          persist();
+        } catch (error) { failed(ctx, `file:${file.path}`, "files", file.path.split("/").pop(), error?.message); }
+        progress({ done: ++done, total: plan.length });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(FILE_WORKERS, plan.length) }, worker));
   }
 
   return { sendKind, sendBotFields, moveMemory, moveSettings, moveFiles };
