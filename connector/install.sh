@@ -302,11 +302,46 @@ remove_updater() {
 
 start_connector() {
   say "Starting the MausBot connector..."
+  # Preflight BEFORE stopping the existing connector: group access to Docker is mandatory.
+  [ -S /var/run/docker.sock ] || fail "Docker socket unavailable; existing connector was not changed."
+  socket_mode=$(stat -c '%a' /var/run/docker.sock) || fail "Cannot inspect Docker socket mode."
+  case "$socket_mode" in '' | *[!0-7]*) fail "Invalid Docker socket permissions." ;; esac
+  [ $((0$socket_mode & 0060)) -eq 0060 ] || fail "Docker socket must allow group read/write for rootless connector; existing connector was not changed."
+  socket_gid=$(stat -c '%g' /var/run/docker.sock) || fail "Cannot inspect Docker socket group."
+  if ! getent group mausbot-connector >/dev/null; then
+    groupadd --system mausbot-connector || fail "Cannot create dedicated connector policy group."
+  fi
+  policy_entry=$(getent group mausbot-connector) || fail "Connector policy group is unavailable."
+  policy_gid=$(printf '%s' "$policy_entry" | cut -d: -f3)
+  policy_members=$(printf '%s' "$policy_entry" | cut -d: -f4)
+  [ -z "$policy_members" ] || fail "Connector policy group has unexpected host members; existing connector was not changed."
+  case "$policy_gid" in '' | *[!0-9]*) fail "Invalid connector policy group." ;; esac
+  [ ! -L "$ETC_DIR" ] && [ ! -L "$AUDIT_DIR" ] || fail "Unsafe connector bind mount symlink."
+  if [ -e "$ETC_DIR/policy.json" ]; then
+    [ -f "$ETC_DIR/policy.json" ] && [ ! -L "$ETC_DIR/policy.json" ] || fail "Unsafe connector policy file."
+  fi
   docker volume create "$STATE_VOLUME" >/dev/null
-  install -d -m 0755 "$ETC_DIR"
-  # The audit log: every job MausBot runs here, root's, for you to read (mausbot-connector audit).
-  install -d -m 0750 "$AUDIT_DIR"
+  # Stop only after the access preflight succeeds; preserve all state bytes.
   docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
+  install -d -m 0755 "$ETC_DIR"
+  if [ -f "$ETC_DIR/policy.json" ]; then
+    chgrp mausbot-connector "$ETC_DIR/policy.json"
+    chmod 0640 "$ETC_DIR/policy.json"
+  fi
+  # The host's root still reads the logs; the high container UID exclusively writes them.
+  install -d -m 0750 "$AUDIT_DIR"
+  chown -R 19001:19001 "$AUDIT_DIR"
+  chmod 0750 "$AUDIT_DIR"
+  if [ "$MODE" = customer-run ]; then
+    [ ! -L "$UPDATE_DIR" ] || fail "Unsafe updater bind mount symlink."
+    chown -R 19001:19001 "$UPDATE_DIR"
+    chmod 0700 "$UPDATE_DIR"
+  fi
+  # One-shot, networkless ownership repair. The long-running connector is never root.
+  docker run --rm --network none --user 0:0 --cap-drop ALL --cap-add CHOWN \
+    --security-opt no-new-privileges=true --entrypoint chown \
+    -v "$STATE_VOLUME:/state" "$CONNECTOR_IMAGE" -R 19001:19001 /state \
+    || fail "Connector state ownership could not be prepared; state was preserved."
   instance=$(cat /proc/sys/kernel/random/uuid)
   set -- --label "$ROLE_LABEL=connector" --label "com.mausbot.instance=$instance" \
     -e "MAUSBOT_INSTANCE=$instance" -e "MAUSBOT_CONNECTOR_IMAGE=$CONNECTOR_IMAGE"
@@ -318,6 +353,7 @@ start_connector() {
     set -- "$@" -e MAUSBOT_MODE=customer-run -v "$UPDATE_DIR:/var/lib/mausbot/update"
   fi
   docker run -d --name "$CONNECTOR" --restart unless-stopped --network host \
+    --user 19001:19001 --group-add "$socket_gid" --group-add "$policy_gid" \
     --security-opt no-new-privileges=true --cap-drop ALL --read-only --tmpfs /tmp \
     -v /var/run/docker.sock:/var/run/docker.sock -v "$STATE_VOLUME:/state" -v "$ETC_DIR:/etc/mausbot:ro" -v "$AUDIT_DIR:/var/log/mausbot" \
     --log-opt max-size=10m --log-opt max-file=3 \

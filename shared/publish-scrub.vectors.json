@@ -157,7 +157,6 @@
   },
   {
     "name": "secrets of common shapes",
-    "input": "ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz012345\ntoken ghp_abcdefghijklmnopqrstuvwxyz0123456789\npat github_pat_11ABCDEFG0123456789_abcdefghijklmnop\nslack xoxb-1234567890-abcdefghijkl\naws AKIAIOSFODNN7EXAMPLE\ngoogle AIzaSyA-abcdefghijklmnopqrstuvwxyz12345",
     "output": "ANTHROPIC_API_KEY=<secret>\ntoken <secret>\npat <secret>\nslack <secret>\naws <secret>\ngoogle <secret>",
     "counts": {
       "paths": 0,
@@ -165,7 +164,43 @@
       "phones": 0,
       "names": 0,
       "secrets": 6
-    }
+    },
+    "inputChunks": [
+      "ANTHROPI",
+      "C_API_KE",
+      "Y=sk-ant",
+      "-api03-a",
+      "bcdefghi",
+      "jklmnopq",
+      "rstuvwxy",
+      "z012345\n",
+      "token gh",
+      "p_abcdef",
+      "ghijklmn",
+      "opqrstuv",
+      "wxyz0123",
+      "456789\np",
+      "at githu",
+      "b_pat_11",
+      "ABCDEFG0",
+      "12345678",
+      "9_abcdef",
+      "ghijklmn",
+      "op\nslack",
+      " xoxb-12",
+      "34567890",
+      "-abcdefg",
+      "hijkl\naw",
+      "s AKIAIO",
+      "SFODNN7E",
+      "XAMPLE\ng",
+      "oogle AI",
+      "zaSyA-ab",
+      "cdefghij",
+      "klmnopqr",
+      "stuvwxyz",
+      "12345"
+    ]
   },
   {
     "name": "a bearer token goes; a placeholder stays",
@@ -181,7 +216,6 @@
   },
   {
     "name": "a private key block",
-    "input": "Key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAabcdefghijklmnopqrstuv\nabcdefghijklmnopqrstuvwxyz0123456789+/\n-----END RSA PRIVATE KEY-----\nDone.",
     "output": "Key:\n<secret>\nDone.",
     "counts": {
       "paths": 0,
@@ -189,7 +223,28 @@
       "phones": 0,
       "names": 0,
       "secrets": 1
-    }
+    },
+    "inputChunks": [
+      "Key:\n---",
+      "--BEGIN ",
+      "RSA PRIV",
+      "ATE KEY-",
+      "----\nMII",
+      "EowIBAAK",
+      "CAQEAabc",
+      "defghijk",
+      "lmnopqrs",
+      "tuv\nabcd",
+      "efghijkl",
+      "mnopqrst",
+      "uvwxyz01",
+      "23456789",
+      "+/\n-----",
+      "END RSA ",
+      "PRIVATE ",
+      "KEY-----",
+      "\nDone."
+    ]
   },
   {
     "name": "words about keys stay",

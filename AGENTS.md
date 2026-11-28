@@ -1,5 +1,11 @@
 # OpenMausBot agent notes
 
+## CIATTO security gate
+
+Run `pnpm security:audit` on the exact candidate commit before integration and `pnpm security:image registry/repo@sha256:<digest>` on every immutable OCI release candidate before production promotion. `pnpm verify:release` includes the source audit. Install checksum-pinned Trivy 0.74.0 using the Ciatto Ops security gate installer on the authorized build runner. The pre-push hook scans pushed commits independently of optional lint hooks. API writes and CI paths must provide equivalent scan evidence before merge or promotion.
+
+Recurring security audits must rescan active image digests with current vulnerability data, record the scanner version, commit/digest and verdict, and track remediation. HIGH/CRITICAL findings or scanner failure block new promotion; never stop existing production automatically. Do not publish secret values or bypass findings. The standalone audit does not apply ignore lists; any exception requires a separately reviewed and expiring policy.
+
 Before claiming a server or conversation change works, follow
 [`docs/verification/README.md`](docs/verification/README.md). Always launch an
 isolated fixture; never verify mutations against the user's live app or data.

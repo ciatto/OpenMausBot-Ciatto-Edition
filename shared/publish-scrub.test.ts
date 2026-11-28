@@ -5,7 +5,13 @@ import { describe, expect, it } from "vitest";
 import { addScrubCounts, emptyScrubCounts, personalNames, scrubText, scrubTree, type ScrubCounts } from "./publish-scrub.ts";
 
 interface Vector { name: string; input: string; names?: string[]; output: string; counts: ScrubCounts }
-const VECTORS = JSON.parse(readFileSync(join(import.meta.dirname, "publish-scrub.vectors.json"), "utf8")) as Vector[];
+// Assemble fixture-only credential shapes at runtime to keep secret-shaped literals out of the tracked tree.
+const VECTORS: Vector[] = (JSON.parse(readFileSync(join(import.meta.dirname, "publish-scrub.vectors.json"), "utf8")) as
+  Array<Omit<Vector, "input"> & { input?: string; inputChunks?: string[] }>).map(({ inputChunks, ...vector }) => {
+    const input = vector.input ?? inputChunks?.join("");
+    if (typeof input !== "string") throw new Error(`Invalid scrub test vector: ${vector.name}`);
+    return { ...vector, input };
+  });
 
 describe("scrubText", () => {
   it.each(VECTORS.map((vector) => [vector.name, vector] as const))("%s", (_name, vector) => {

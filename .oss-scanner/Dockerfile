@@ -30,11 +30,13 @@ ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 # Scanner contract: the checkout lives at /src.
-COPY . /src
+COPY --chown=node:node . /src
 WORKDIR /src
 
 # pnpm at exactly package.json#packageManager.
-RUN corepack enable && corepack install
+RUN corepack enable && corepack install \
+  && chown -R node:node /opt/corepack
+USER node
 
 # Every workspace member from the committed lockfile. `prepare` (git hooks)
 # is a no-op here because the build context has no .git.
