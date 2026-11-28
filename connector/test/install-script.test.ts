@@ -90,6 +90,11 @@ describe("install.sh", () => {
     expect(script).toContain(`say "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept."`);
     expect(script).toContain(`com.mausbot.instance=$instance`);
     expect(script).toContain("--restart unless-stopped --network host");
+    // Rootless migration may fail on old root-owned state. Never stop a healthy connector first.
+    const start = script.slice(script.indexOf("start_connector() {"), script.indexOf("\ncheck_box() {"));
+    expect(start.indexOf('docker volume create "$STATE_VOLUME"')).toBeLessThan(start.indexOf('--cap-add CHOWN --cap-add DAC_OVERRIDE'));
+    expect(start.indexOf('--cap-add CHOWN --cap-add DAC_OVERRIDE')).toBeLessThan(start.indexOf('docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT"'));
+    expect(start.indexOf('docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT"')).toBeLessThan(start.indexOf('docker run -d --name "$CONNECTOR"'));
     expect(script).toContain("-v /var/run/docker.sock:/var/run/docker.sock -v \"$STATE_VOLUME:/state\" -v \"$ETC_DIR:/etc/mausbot:ro\" -v \"$AUDIT_DIR:/var/log/mausbot\"");
     expect(script).toContain('AUDIT_DIR="${MAUSBOT_AUDIT_DIR:-/var/log/mausbot}"');
     expect(PATHS.audit).toBe("/var/log/mausbot");
