@@ -77,7 +77,9 @@ COPY . .
 # The Cloud home runs these as root, so nobody else may write them. The web app's
 # build needs more heap than Node gives itself on a 4 GB server, where it ran out
 # of memory: a fixed limit, which such a server meets with swap (docs/deploy-vps.md).
-RUN NODE_OPTIONS=--max-old-space-size=2048 GOMAXPROCS=1 GOMEMLIMIT=256MiB pnpm build:server
+# The TypeScript server compiler must also leave native memory headroom inside
+# the same 2 GiB builder; a 2 GiB JS heap was killed before bundling.
+RUN NODE_OPTIONS="--max-old-space-size=1536 --max-semi-space-size=16" GOMAXPROCS=1 GOMEMLIMIT=256MiB pnpm build:server
 # The governed BuildKit container is capped at 2 GiB and has no swap. A 3 GiB JS heap
 # caused the kernel to SIGKILL Vite before the security image gate could run.
 # Leave memory for Rollup native allocations, esbuild and filesystem buffers.
