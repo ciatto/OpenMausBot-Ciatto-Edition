@@ -1,0 +1,22 @@
+{
+  "id": "ciatto-code-intelligence",
+  "name": "CIATTO Code Intelligence",
+  "version": "1.0.0",
+  "description": "Analyze authorized GitHub repositories with commit-pinned code context, documentation index, and evidence-backed architecture diagrams through the connected Ciatto Ops MCP.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "code intelligence",
+    "gitdiagram",
+    "deepwiki",
+    "gitingest",
+    "repomix",
+    "mapa do repositório",
+    "arquitetura do repositório",
+    "documentar repositório",
+    "analisar repositório",
+    "repository architecture",
+    "codebase diagram",
+    "análise de código github"
+  ],
+  "requiredCapabilities": []
+}
