@@ -77,7 +77,8 @@ COPY . .
 # The Cloud home runs these as root, so nobody else may write them. The web app's
 # build needs more heap than Node gives itself on a 4 GB server, where it ran out
 # of memory: a fixed limit, which such a server meets with swap (docs/deploy-vps.md).
-RUN pnpm build:server && NODE_OPTIONS=--max-old-space-size=6144 pnpm exec vite build && chmod -R go-w dist dist-server skills
+RUN NODE_OPTIONS=--max-old-space-size=2048 GOMAXPROCS=1 GOMEMLIMIT=256MiB pnpm build:server
+RUN NODE_OPTIONS=--max-old-space-size=3072 GOMAXPROCS=1 GOMEMLIMIT=256MiB pnpm exec vite build && chmod -R go-w dist dist-server skills
 # The Data engine's native modules (server/data/engine.ts), staged like the
 # desktop app's extraResources for the image's CPU (amd64 -> x64, arm64), into
 # one tree the runtime stages copy. Cross-builds install both CPU packages;
