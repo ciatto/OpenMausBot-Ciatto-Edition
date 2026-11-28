@@ -46,9 +46,14 @@ case "$mode" in
     ;;
   image)
     target="${2:-}"
-    [[ "$target" =~ ^[a-zA-Z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || fail "immutable OCI digest required"
+    if [[ "$target" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      # Local immutable Docker image ID, verified after build and before publication.
+      image_local_id=true
+    else
+      [[ "$target" =~ ^[a-zA-Z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || fail "immutable OCI digest or local image ID required"
+    fi
     ;;
-  *) fail "usage: bash scripts/trivy-audit.sh fs [commit] | image repository@sha256:digest" ;;
+  *) fail "usage: bash scripts/trivy-audit.sh fs [commit] | image repository@sha256:digest | image sha256:local-id" ;;
 esac
 # Do not honor repository or environment-supplied Trivy configuration/ignore rules.
 # Exceptions must be handled separately by reviewed security policy.
@@ -61,7 +66,9 @@ set +e
 (
   while IFS='=' read -r name _; do case "$name" in TRIVY_*) unset "$name";; esac; done < <(env)
   cd "$tmp"
-  "$bin" --config "$tmp/config.yaml" "$mode" --quiet --disable-telemetry --skip-version-check \
+  extra=()
+  if [[ "$mode" = image && "${image_local_id:-false}" = true ]]; then extra=(--image-src docker); fi
+  "$bin" --config "$tmp/config.yaml" "$mode" "${extra[@]}" --quiet --disable-telemetry --skip-version-check \
     --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --exit-code 1 \
     --db-repository ghcr.io/aquasecurity/trivy-db:2 --db-repository mirror.gcr.io/aquasec/trivy-db:2 \
     --ignorefile "$tmp/empty.ignore" --format template --template "@$tmp/template.tpl" \
