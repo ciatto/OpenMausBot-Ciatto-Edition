@@ -17,6 +17,7 @@ COPY install.sh ./install.sh
 COPY src ./src
 RUN printf '#!/bin/sh\nexec node --disable-warning=ExperimentalWarning /app/src/main.ts "$@"\n' > /usr/local/bin/mausbot-connector \
   && chmod 0755 /usr/local/bin/mausbot-connector \
+  && chmod -R a+rX /app \
   && chmod -R go-w /app \
   && mausbot-connector version
 ENV NODE_ENV=production
