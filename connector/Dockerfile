@@ -3,6 +3,8 @@
 # Node runs its TypeScript as it is; it has no npm dependencies. bubblewrap is here only for the box probe, which runs
 # from this image with the home's own security settings.
 FROM node:24-bookworm-slim
+# Dedicated high UID avoids host-user collisions for bind-mounted state and audit files.
+RUN groupadd --gid 19001 mausbot && useradd --uid 19001 --gid 19001 --home-dir /app --shell /usr/sbin/nologin --no-create-home mausbot
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bubblewrap ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
@@ -18,6 +20,6 @@ RUN printf '#!/bin/sh\nexec node --disable-warning=ExperimentalWarning /app/src/
   && chmod -R go-w /app \
   && mausbot-connector version
 ENV NODE_ENV=production
-USER root
+USER 19001:19001
 ENTRYPOINT ["mausbot-connector"]
 CMD ["run"]
