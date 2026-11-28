@@ -87,20 +87,20 @@ RUN arch=x64 && if [ "$TARGETARCH" = arm64 ]; then arch=arm64; fi \
   && OMB_DUCKDB_ARCH=$arch node scripts/prepare-duckdb.mjs \
   && mv "dist-native/duckdb/linux-$arch" dist-native/duckdb/target && chmod -R go-w dist-native/duckdb
 
-FROM node:24-bookworm-slim AS runtime
-# Install Chrome's Bookworm libraries directly: agent-browser --with-deps
+FROM node:24-trixie-slim@sha256:4d00acb4bcc42c454c4eb801526f7ad7f772ea3bd4fd168c5cc2e384abcbb9d4 AS runtime
+# Install Chrome's Trixie libraries directly: agent-browser --with-deps
 # invokes sudo even as root, and this image deliberately does not ship sudo.
 # git + openssh-client: agent CLIs shell out to git, and the VPS desktop reaches
 # servers over ssh; curl backs the healthcheck. tini is
 # the server image's init, and what its launcher falls back to as PID 1.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini \
+  && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini libzstd1 \
     libxcb-shm0 libx11-xcb1 libx11-6 libxcb1 libxext6 libxrandr2 \
-    libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libgtk-3-0 \
-    libpangocairo-1.0-0 libpango-1.0-0 libatk1.0-0 libcairo-gobject2 \
-    libcairo2 libgdk-pixbuf-2.0-0 libxrender1 libasound2 libfreetype6 \
+    libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libgtk-3-0t64 \
+    libpangocairo-1.0-0 libpango-1.0-0 libatk1.0-0t64 libcairo-gobject2 \
+    libcairo2 libgdk-pixbuf-2.0-0 libxrender1 libasound2t64 libfreetype6 \
     libfontconfig1 libdbus-1-3 libnss3 libnss3-tools libnspr4 \
-    libatk-bridge2.0-0 libdrm2 libxkbcommon0 libatspi2.0-0 libcups2 \
+    libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libatspi2.0-0t64 libcups2t64 \
     libxshmfence1 libgbm1 fonts-noto-color-emoji fonts-noto-cjk fonts-freefont-ttf \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --create-home --home-dir /data --shell /bin/bash maus
@@ -113,7 +113,7 @@ ARG AGENT_BROWSER_VERSION=0.39.0
 ARG CHROME_CACHE_TAG=""
 # Chrome for Testing has no Linux ARM64 build, so an arm64 image takes
 # Debian's Chromium instead, linked at the same path; the publish job passes
-# its newest bookworm version so a Debian security update rebuilds it too.
+# its newest trixie version so a Debian security update rebuilds it too.
 # A browser on a private display reads Chrome's lock-down policy from a folder
 # its own mount namespace covers (server/browser/desktop/policy.ts); Debian's
 # Chromium makes no /etc/chromium/policies, so the image does.
@@ -122,6 +122,7 @@ ARG TARGETARCH
 # The global link must be the native binary for this platform (agent-browser's
 # postinstall points it there); the other platforms' binaries are never run.
 RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CACHE_TAG:-Stable}, Debian Chromium ${CHROMIUM_CACHE_TAG:-latest}" \
+  && npm install -g --cache /tmp/npm-cache npm@11.21.3 \
   && npm install -g --cache /tmp/npm-cache agent-browser@${AGENT_BROWSER_VERSION} \
   && if [ "$TARGETARCH" = arm64 ]; then \
        apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/* \
