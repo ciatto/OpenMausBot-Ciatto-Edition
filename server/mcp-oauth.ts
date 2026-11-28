@@ -106,6 +106,25 @@ function preferredPort(url: string): number {
   return 20_000 + (hash % 20_000);
 }
 
+// A protected resource advertises every possible scope, not a requested grant.
+// CIATTO Ops includes privileged write and personal WhatsApp scopes in that
+// advertisement. Default to its explicit read scope unless a user registered
+// a client with a deliberately configured scope selection.
+export function selectMcpSignInScopes(url: string, configured: string[] | undefined, advertised: string[] | undefined): string[] | undefined {
+  if (configured?.length) return [...configured];
+  let target: URL;
+  try {
+    target = new URL(url);
+  } catch {
+    return advertised === undefined ? undefined : [...advertised];
+  }
+  if (target.origin === "https://ops.ciatto.app" && target.pathname === "/mcp" && !target.search && !target.hash) {
+    if (!advertised?.includes("ops.read")) throw new McpSignInError("Ciatto Ops does not advertise the required read scope.", 400);
+    return ["ops.read"];
+  }
+  return advertised === undefined ? undefined : [...advertised];
+}
+
 export function mcpOAuthRedirectUri(url: string): string {
   return `http://127.0.0.1:${preferredPort(url)}${CALLBACK_PATH}`;
 }
@@ -574,6 +593,7 @@ export class McpOAuthManager {
     const meta = await discoverMcpAuth(url, wwwAuthenticate ?? await this.challenge(url));
     if (!meta) throw new McpOAuthError("not-oauth", "This server does not offer an OAuth sign-in. Add its token as a header instead.");
     const registered = this.clients(name, url);
+    const scopes = selectMcpSignInScopes(url, registered?.scopes, meta.scopes);
 
     /** An app with a configured return address always returns there: it is the one address the provider has registered,
      * and the only one a browser on another computer can reach. The public route completes it, so no listener runs. */
@@ -583,7 +603,6 @@ export class McpOAuthManager {
         ...(registered.clientSecret ? { secret: registered.clientSecret } : {}),
         method: tokenAuthMethod(meta, registered.clientSecret),
       };
-      const scopes = registered.scopes?.length ? registered.scopes : meta.scopes;
       return { ...this.open(name, url, starting, meta, registered.redirectUri, client, null, scopes).status };
     }
 
@@ -595,7 +614,7 @@ export class McpOAuthManager {
       } catch (error) {
         if (!(error instanceof RegistrationRefused)) throw error;
       }
-      if (client) return { ...this.open(name, url, starting, meta, redirectUri, client, null, meta.scopes).status };
+      if (client) return { ...this.open(name, url, starting, meta, redirectUri, client, null, scopes).status };
     }
 
     const listener = await this.listener(preferredPort(url), registered !== undefined);
@@ -604,7 +623,6 @@ export class McpOAuthManager {
       const client: ClientAuth = registered
         ? { id: registered.clientId, ...(registered.clientSecret ? { secret: registered.clientSecret } : {}), method: tokenAuthMethod(meta, registered.clientSecret) }
         : await this.register(meta, redirectUri);
-      const scopes = registered?.scopes?.length ? registered.scopes : meta.scopes;
       const flow = this.open(name, url, starting, meta, redirectUri, client, listener, scopes);
       listener.reserved -= 1;
       listener.flows.add(flow);

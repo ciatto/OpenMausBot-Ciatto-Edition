@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { cardOwner, McpOAuthError, McpOAuthManager, mcpCallbackOrigin, mcpOAuthRedirectUri, type McpSignInPhase, type McpSignInStatus, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
+import { cardOwner, selectMcpSignInScopes, McpOAuthError, McpOAuthManager, mcpCallbackOrigin, mcpOAuthRedirectUri, type McpSignInPhase, type McpSignInStatus, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth, type FakeOAuth, type FakeOAuthOptions } from "./testing/fake-oauth-server.ts";
@@ -869,5 +869,31 @@ describe("mcpCallbackOrigin", () => {
     expect(mcpCallbackOrigin("http://192.168.1.5:3000", [])).toBeNull();
     expect(mcpCallbackOrigin(null, ["http://me.example", "https://me.example/omb", "https://user:pw@me.example", "not a url"])).toBeNull();
     expect(mcpCallbackOrigin(null, [])).toBeNull();
+  });
+});
+
+describe("CIATTO Ops least-privilege OAuth scopes", () => {
+  const ops = "https://ops.ciatto.app/mcp";
+  const advertised = ["ops.read", "ops.write", "sendbot.whatsapp.personal"];
+
+  it("requests only read on dynamically registered CIATTO Ops clients", () => {
+    expect(selectMcpSignInScopes(ops, undefined, advertised)).toEqual(["ops.read"]);
+    expect(advertised).toEqual(["ops.read", "ops.write", "sendbot.whatsapp.personal"]);
+  });
+
+  it("honors an explicitly configured scope, without silently elevating", () => {
+    expect(selectMcpSignInScopes(ops, ["ops.read", "ops.write"], advertised)).toEqual(["ops.read", "ops.write"]);
+    expect(selectMcpSignInScopes(ops, ["ops.read"], advertised)).toEqual(["ops.read"]);
+  });
+
+  it("fails closed without a read scope and never accepts a lookalike domain", () => {
+    expect(() => selectMcpSignInScopes(ops, undefined, ["ops.write"])).toThrow(/read scope/);
+    expect(selectMcpSignInScopes("https://ops.ciatto.app.evil.test/mcp", undefined, advertised)).toEqual(advertised);
+    expect(selectMcpSignInScopes("https://ops.ciatto.app/other", undefined, advertised)).toEqual(advertised);
+  });
+
+  it("preserves the default scope behavior for unrelated MCP providers", () => {
+    expect(selectMcpSignInScopes("https://mcp.example.test/mcp", undefined, ["read", "write"])).toEqual(["read", "write"]);
+    expect(selectMcpSignInScopes("https://mcp.example.test/mcp", undefined, undefined)).toBeUndefined();
   });
 });
