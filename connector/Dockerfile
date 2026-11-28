@@ -5,7 +5,8 @@
 # Reuse the official Node 24 distribution; ship only its runtime on a patched Ubuntu base.
 FROM node:24-trixie-slim@sha256:4d00acb4bcc42c454c4eb801526f7ad7f772ea3bd4fd168c5cc2e384abcbb9d4 AS node-runtime
 FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db AS runtime
-COPY --from=node-runtime /usr/local/ /usr/local/
+# The connector invokes Node directly; npm/corepack and their vulnerable transitive packages are unnecessary.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 # Dedicated high UID avoids host-user collisions for bind-mounted state and audit files.
 RUN groupadd --gid 19001 mausbot && useradd --uid 19001 --gid 19001 --home-dir /app --shell /usr/sbin/nologin --no-create-home mausbot
 RUN apt-get update \
