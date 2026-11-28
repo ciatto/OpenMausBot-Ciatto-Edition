@@ -87,14 +87,24 @@ RUN arch=x64 && if [ "$TARGETARCH" = arm64 ]; then arch=arm64; fi \
   && OMB_DUCKDB_ARCH=$arch node scripts/prepare-duckdb.mjs \
   && mv "dist-native/duckdb/linux-$arch" dist-native/duckdb/target && chmod -R go-w dist-native/duckdb
 
-FROM node:24-trixie-slim@sha256:4d00acb4bcc42c454c4eb801526f7ad7f772ea3bd4fd168c5cc2e384abcbb9d4 AS runtime
-# Install Chrome's Trixie libraries directly: agent-browser --with-deps
+# Keep the reviewed official Node distribution separate from the OS packages.
+FROM node:24-trixie-slim@sha256:4d00acb4bcc42c454c4eb801526f7ad7f772ea3bd4fd168c5cc2e384abcbb9d4 AS node-runtime
+# Ubuntu LTS provides the OpenSSH and libxml2 security updates missing from
+# Debian stable. The index covers amd64 and arm64.
+FROM node-runtime AS runtime-base-arm64
+FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db AS runtime-base-amd64
+COPY --from=node-runtime /usr/local/ /usr/local/
+COPY --from=node-runtime /opt/yarn-v1.22.22/ /opt/yarn-v1.22.22/
+# Retain Debian on ARM until Ubuntu's Chromium packaging is separately qualified.
+FROM runtime-base-${TARGETARCH} AS runtime
+# Install Chrome's Ubuntu LTS libraries directly: agent-browser --with-deps
 # invokes sudo even as root, and this image deliberately does not ship sudo.
 # git + openssh-client: agent CLIs shell out to git, and the VPS desktop reaches
 # servers over ssh; curl backs the healthcheck. tini is
 # the server image's init, and what its launcher falls back to as PID 1.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini libzstd1 \
+  && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini libzstd1 \
     libxcb-shm0 libx11-xcb1 libx11-6 libxcb1 libxext6 libxrandr2 \
     libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libgtk-3-0t64 \
     libpangocairo-1.0-0 libpango-1.0-0 libatk1.0-0t64 libcairo-gobject2 \
@@ -103,7 +113,8 @@ RUN apt-get update \
     libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libatspi2.0-0t64 libcups2t64 \
     libxshmfence1 libgbm1 fonts-noto-color-emoji fonts-noto-cjk fonts-freefont-ttf \
   && rm -rf /var/lib/apt/lists/* \
-  && useradd --create-home --home-dir /data --shell /bin/bash maus
+  && groupadd -g 1001 maus \
+  && useradd -u 1001 -g 1001 --create-home --home-dir /data --shell /bin/bash maus
 # The bots' browser (docs/plans/browser-engine.md): the pinned agent-browser
 # and a Chrome for Testing with its libraries, so a server bot can browse.
 # Pin here and in server/browser-engine-release.ts together.
