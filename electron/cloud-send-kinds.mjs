@@ -80,6 +80,36 @@ export function planFiles(here, there, sent, label) {
   return plan;
 }
 
+/** The server stages chunks by SHA-256 and size, not by destination path.
+ * A conflict can also redirect a file to its suffixed sibling. Keep every
+ * intersecting staging key or possible destination in the same serial lane. */
+function fileLanes(plan, label) {
+  const parents = plan.map((_, i) => i);
+  const root = (i) => {
+    while (parents[i] !== i) {
+      parents[i] = parents[parents[i]];
+      i = parents[i];
+    }
+    return i;
+  };
+  const seen = new Map();
+  for (const [i, file] of plan.entries()) {
+    for (const key of [`sha:${file.sha256}:${file.size}`, `path:${file.to}`, `path:${keptBoth(file.path, label)}`]) {
+      const previous = seen.get(key);
+      if (previous !== undefined) parents[root(i)] = root(previous);
+      else seen.set(key, i);
+    }
+  }
+  const lanes = new Map();
+  for (const [i, file] of plan.entries()) {
+    const key = root(i);
+    const lane = lanes.get(key) ?? [];
+    lane.push(file);
+    lanes.set(key, lane);
+  }
+  return [...lanes.values()];
+}
+
 const parseFiles = (value) => list(value?.files).filter((file) => record(file) && typeof file.path === "string" && FILE_PATH.test(file.path)
   && Number.isSafeInteger(file.size) && file.size >= 0 && typeof file.sha256 === "string" && SHA.test(file.sha256));
 
@@ -261,23 +291,25 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
     }
     progress(plan.length ? { done: 0, total: plan.length } : null);
     let done = 0, cursor = 0;
-    // Paths are independent; offsets inside a single file are still serial in
-    // sendFile. Bounded workers avoid overwhelming the destination and keep
-    // the journal durable after every completed file for restart-safe resumes.
+    const lanes = fileLanes(plan, label);
+    // Only disjoint lanes run together. Identical content shares server-side
+    // staging, and conflict-renamed paths can overlap with other files.
     const worker = async () => {
-      while (cursor < plan.length) {
-        const file = plan[cursor++];
-        try {
-          const stored = await sendFile(ctx, file, label);
-          kept.files[stored.to] = file.sha256;
-          ctx.result.files.sent++;
-          if (stored.kept) ctx.result.files.kept++;
-          persist();
-        } catch (error) { failed(ctx, `file:${file.path}`, "files", file.path.split("/").pop(), error?.message); }
-        progress({ done: ++done, total: plan.length });
+      while (cursor < lanes.length) {
+        const lane = lanes[cursor++];
+        for (const file of lane) {
+          try {
+            const stored = await sendFile(ctx, file, label);
+            kept.files[stored.to] = file.sha256;
+            ctx.result.files.sent++;
+            if (stored.kept) ctx.result.files.kept++;
+            persist();
+          } catch (error) { failed(ctx, `file:${file.path}`, "files", file.path.split("/").pop(), error?.message); }
+          progress({ done: ++done, total: plan.length });
+        }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(FILE_WORKERS, plan.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(FILE_WORKERS, lanes.length) }, worker));
   }
 
   return { sendKind, sendBotFields, moveMemory, moveSettings, moveFiles };

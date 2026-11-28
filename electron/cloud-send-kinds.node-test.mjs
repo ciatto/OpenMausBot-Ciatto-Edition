@@ -148,6 +148,41 @@ test("a large move uploads independent files with a bounded pool, journals every
   assert.equal(sides.uploads.length, here.length, "a resumed pass only verifies arrivals and does not resend files");
 });
 
+test("parallel moves serialize identical staging hashes and potential conflict destinations", async () => {
+  const here = [
+    ["report.md", "same"], ["other.md", "same"],
+    ["report (Mac).md", "different"], ["another.md", "unique"],
+    ["empty-a.md", ""], ["empty-b.md", ""],
+  ].map(([name, text]) => ({ ...file(`workspaces/b1/${name}`, text), text }));
+  const sides = filesSides({ here });
+  const originalUpload = sides.ctx.session.upload;
+  const active = new Set();
+  let peak = 0;
+  sides.ctx.session.upload = async (route, ...args) => {
+    const q = new URL(`http://x${route}`).searchParams;
+    const key = q.get("sha256") + ":" + q.get("size");
+    const path = q.get("path");
+    const destinations = [path, keptBoth(path, "Mac")];
+    for (const lock of [key, ...destinations]) assert.ok(!active.has(lock), `overlapping upload: ${lock}`);
+    for (const lock of [key, ...destinations]) active.add(lock);
+    peak = Math.max(peak, active.size);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      return await originalUpload(route, ...args);
+    } finally {
+      for (const lock of [key, ...destinations]) active.delete(lock);
+    }
+  };
+  await sides.kinds.moveFiles(sides.ctx, [{ id: "b1" }], "Mac");
+  assert.ok(peak > 3, "unrelated files still overlap");
+  assert.deepEqual(sides.failed, []);
+  assert.equal(sides.stored.size, here.length);
+  for (const entry of here) assert.equal(sides.stored.get(entry.path).sha256, entry.sha256);
+  const sent = sides.uploads.length;
+  await sides.kinds.moveFiles(sides.ctx, [{ id: "b1" }], "Mac");
+  assert.equal(sides.uploads.length, sent);
+});
+
 test("a large destination file index preserves conflict handling without scanning every path", () => {
   const theirs = Array.from({ length: 4000 }, (_, i) => file(`workspaces/b1/there-${i}.txt`, `hash-${i}`));
   const here = Array.from({ length: 4000 }, (_, i) => file(`workspaces/b1/here-${i}.txt`, `different-${i}`));
